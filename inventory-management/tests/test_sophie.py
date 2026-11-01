@@ -230,4 +230,87 @@ def test_list_transactions_returns_dated_records_and_filters_by_supplier_and_pro
     assert len(by_product) == 1
     assert by_product[0]["product_id"] == b["id"]
 
-    
+
+# ---------------------------------------------------------------------------
+# Feature 9: Manage products via web UI
+# ---------------------------------------------------------------------------
+
+def test_ui_products_add_and_delete_forms_update_store_and_page(client):
+    assert client.get("/ui/products").status_code == 200
+
+    resp = client.post("/ui/products", data={
+        "name": "UI Widget", "sku": "UI-1", "unit_price": "3.50", "quantity_on_hand": "8",
+    })
+    assert resp.status_code == 302  # redirect back to the products page
+
+    products = client.get("/products").get_json()
+    assert len(products) == 1
+    assert products[0]["name"] == "UI Widget"
+    assert products[0]["unit_price"] == 3.5
+    assert products[0]["quantity_on_hand"] == 8
+    assert products[0]["reorder_level"] == 0  # the form has no reorder_level field
+    assert b"UI Widget" in client.get("/ui/products").data
+
+    # Delete via the UI
+    pid = products[0]["id"]
+    assert client.post(f"/ui/products/{pid}/delete").status_code == 302
+    assert client.get(f"/products/{pid}").status_code == 404
+    assert b"UI Widget" not in client.get("/ui/products").data
+
+    # Deleting a nonexistent product does not crash
+    assert client.post("/ui/products/999/delete").status_code == 302
+
+
+# ---------------------------------------------------------------------------
+# Feature 10: Manage suppliers via web UI
+# ---------------------------------------------------------------------------
+
+def test_ui_suppliers_add_and_delete_forms_update_store_and_page(client):
+    assert client.get("/ui/suppliers").status_code == 200
+
+    resp = client.post("/ui/suppliers", data={
+        "name": "UI Supplier", "contact_email": "ui@test.com",
+    })
+    assert resp.status_code == 302
+
+    suppliers = client.get("/suppliers").get_json()
+    assert len(suppliers) == 1
+    assert suppliers[0]["name"] == "UI Supplier"
+    assert suppliers[0]["contact_email"] == "ui@test.com"
+
+    # Contact info is visible to staff on the page (R6)
+    page = client.get("/ui/suppliers").data
+    assert b"UI Supplier" in page
+    assert b"ui@test.com" in page
+
+    # Delete via the UI
+    sid = suppliers[0]["id"]
+    assert client.post(f"/ui/suppliers/{sid}/delete").status_code == 302
+    assert client.get(f"/suppliers/{sid}").status_code == 404
+    assert client.get("/suppliers").get_json() == []
+
+    # Deleting a nonexistent supplier does not crash
+    assert client.post("/ui/suppliers/999/delete").status_code == 302
+
+
+# ---------------------------------------------------------------------------
+# Feature 11: List suppliers
+# ---------------------------------------------------------------------------
+
+def test_list_suppliers_returns_contact_details_and_excludes_deleted(client):
+    assert client.get("/suppliers").get_json() == []
+
+    keep = make_supplier(client, "Acme", "acme@test.com")
+    drop = make_supplier(client, "Globex", "globex@test.com")
+
+    resp = client.get("/suppliers")
+    assert resp.status_code == 200
+    suppliers = resp.get_json()
+    assert len(suppliers) == 2
+    by_name = {s["name"]: s for s in suppliers}
+    assert by_name["Acme"]["contact_email"] == "acme@test.com"
+    assert by_name["Globex"]["contact_email"] == "globex@test.com"
+    assert all(set(s) == {"id", "name", "contact_email"} for s in suppliers)
+
+    assert client.delete(f"/suppliers/{drop['id']}").status_code == 204
+    assert [s["id"] for s in client.get("/suppliers").get_json()] == [keep["id"]]
