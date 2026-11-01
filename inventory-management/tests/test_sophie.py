@@ -147,3 +147,87 @@ def test_delete_product_removes_it_and_repeat_delete_returns_404(client):
     again = client.delete(f"/products/{a['id']}")
     assert again.status_code == 404
     assert again.get_json() == {"error": "Product not found"}
+
+# ---------------------------------------------------------------------------
+# Feature 6: View stock level
+# ---------------------------------------------------------------------------
+
+def test_stock_level_reflects_transactions_reaches_zero_and_404_for_unknown(client):
+    p = make_product(client, quantity_on_hand=10)
+    url = f"/products/{p['id']}/stock-level"
+
+    resp = client.get(url)
+    assert resp.status_code == 200
+    assert resp.get_json() == {"product_id": p["id"], "quantity_on_hand": 10}
+
+    # Chained workflow: 10 + 5 - 3 = 12
+    record_tx(client, p["id"], "IN", 5)
+    record_tx(client, p["id"], "OUT", 3)
+    assert client.get(url).get_json()["quantity_on_hand"] == 12
+
+    # Boundary: exactly zero
+    record_tx(client, p["id"], "OUT", 12)
+    assert client.get(url).get_json()["quantity_on_hand"] == 0
+
+    missing = client.get("/products/999/stock-level")
+    assert missing.status_code == 404
+    assert missing.get_json() == {"error": "Product not found"}
+
+
+# ---------------------------------------------------------------------------
+# Feature 7: List low-stock products
+# ---------------------------------------------------------------------------
+
+def test_low_stock_list_boundary_and_changes_after_transactions(client):
+    assert client.get("/products/low-stock").get_json() == []
+
+    below = make_product(client, name="Below", sku="B", quantity_on_hand=2, reorder_level=5)
+    at = make_product(client, name="At", sku="A", quantity_on_hand=5, reorder_level=5)
+    above = make_product(client, name="Above", sku="C", quantity_on_hand=6, reorder_level=5)
+
+    # At-or-below the threshold is flagged; above is not
+    ids = {p["id"] for p in client.get("/products/low-stock").get_json()}
+    assert ids == {below["id"], at["id"]}
+
+    # Selling the "above" product down to its threshold flags it (6 -> 4)
+    record_tx(client, above["id"], "OUT", 2)
+    ids = {p["id"] for p in client.get("/products/low-stock").get_json()}
+    assert above["id"] in ids
+
+    # Restocking removes a product from the list (2 -> 22)
+    record_tx(client, below["id"], "IN", 20)
+    ids = {p["id"] for p in client.get("/products/low-stock").get_json()}
+    assert below["id"] not in ids
+
+
+# ---------------------------------------------------------------------------
+# Feature 8: List / filter transactions
+# ---------------------------------------------------------------------------
+
+def test_list_transactions_returns_dated_records_and_filters_by_supplier_and_product(client):
+    assert client.get("/transactions").get_json() == []
+
+    supplier = make_supplier(client)
+    a = make_product(client, name="A", sku="A")
+    b = make_product(client, name="B", sku="B")
+    record_tx(client, a["id"], "IN", 5, supplier_id=supplier["id"])
+    record_tx(client, b["id"], "IN", 9)
+
+    # Every movement is listed with type, quantity and a date (R5)
+    txs = client.get("/transactions").get_json()
+    assert len(txs) == 2
+    assert [t["quantity"] for t in txs] == [5, 9]
+    assert all(t["transaction_date"] for t in txs)
+
+    # Supplier filter works
+    by_supplier = client.get(f"/transactions?supplier_id={supplier['id']}").get_json()
+    assert len(by_supplier) == 1
+    assert by_supplier[0]["product_id"] == a["id"]
+
+    # EXPECTED TO FAIL: README documents ?product_id=, but the code compares it
+    # with t.supplier_id, so this returns [] instead of product B's transaction.
+    by_product = client.get(f"/transactions?product_id={b['id']}").get_json()
+    assert len(by_product) == 1
+    assert by_product[0]["product_id"] == b["id"]
+
+    
