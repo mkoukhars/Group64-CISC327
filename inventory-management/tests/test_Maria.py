@@ -492,3 +492,69 @@ def test_receive_purchase_order(client):
 
     assert stock_response.status_code == 200
     assert stock_response.get_json()["quantity_on_hand"] == 70
+
+    
+
+# F22: Web interface transaction tests
+def test_record_and_view_transactions_through_web_ui(client):
+    """Stock transactions can be recorded through the web UI and viewed on the transactions page."""
+
+    supplier_payload = {
+        "name": "Example Supplies",
+        "contact_email": "supplies@example.com"
+    }
+
+    supplier_response = client.post("/suppliers", json=supplier_payload)
+    supplier_id = supplier_response.get_json()["id"]
+
+    product_payload = {
+        "name": "Keyboard",
+        "sku": "KEY-001",
+        "unit_price": 50.00,
+        "quantity_on_hand": 10,
+        "reorder_level": 2
+    }
+
+    product_response = client.post("/products", json=product_payload)
+    product_id = product_response.get_json()["id"]
+
+    page_response = client.get("/ui/transactions")
+
+    assert page_response.status_code == 200
+    assert b"Transactions" in page_response.data
+
+    stock_in_response = client.post(
+        "/ui/transactions",
+        data={
+            "product_id": str(product_id),
+            "type": "IN",
+            "quantity": "5",
+            "supplier_id": str(supplier_id)
+        }
+    )
+
+    assert stock_in_response.status_code == 302
+
+    stock_out_response = client.post(
+        "/ui/transactions",
+        data={
+            "product_id": str(product_id),
+            "type": "OUT",
+            "quantity": "3"
+        }
+    )
+
+    assert stock_out_response.status_code == 302
+
+    stock_response = client.get(f"/products/{product_id}/stock-level")
+
+    assert stock_response.status_code == 200
+    assert stock_response.get_json()["quantity_on_hand"] == 12
+
+    page_response = client.get("/ui/transactions")
+
+    assert page_response.status_code == 200
+    assert b"IN" in page_response.data
+    assert b"OUT" in page_response.data
+    assert b"5" in page_response.data
+    assert b"3" in page_response.data
