@@ -10,6 +10,7 @@ def create_app():
     from app.routes.purchase_orders import purchase_orders_bp
     from app.routes.views import views_bp
     from app.routes.alerts import alerts_bp
+    from app.routes.bestsellers import bestsellers_bp
 
     app.register_blueprint(products_bp)
     app.register_blueprint(suppliers_bp)
@@ -17,5 +18,6 @@ def create_app():
     app.register_blueprint(purchase_orders_bp)
     app.register_blueprint(views_bp)
     app.register_blueprint(alerts_bp)
+    app.register_blueprint(bestsellers_bp)
 
     return app
