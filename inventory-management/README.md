@@ -55,6 +55,7 @@ app working without a REST client, and calls the same in-memory store.
 | DELETE | `/suppliers/<id>` | Delete a supplier |
 | POST | `/transactions` | Record a stock movement (`product_id`, `type`: IN/OUT, `quantity`, optional `supplier_id`) |
 | GET | `/transactions?product_id=&supplier_id=` | Look up transactions |
+| GET |	/reports/bestsellers?days=30 | Returns products ranked by average units sold per day over the requested number of days. Defaults to 30 days. |
 
 ## Tests
 
