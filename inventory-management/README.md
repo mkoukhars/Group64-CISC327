@@ -58,6 +58,7 @@ app working without a REST client, and calls the same in-memory store.
 | GET | `/alerts?severity=` | List active low-stock alerts (products at or below `reorder_level`), most urgent first. `severity`: `low_stock` or `out_of_stock` |
 | GET | `/alerts/<product_id>` | Get the active alert for one product (404 if it has none) |
 | GET |    `/reports/bestsellers?days=30` | Returns products ranked by average units sold per day over the requested number of days. Defaults to 30 days. |
+| GET |	/reports/bestsellers?days=30 | Returns products ranked by average units sold per day over the requested number of days. Defaults to 30 days. |
 
 ## Tests
 

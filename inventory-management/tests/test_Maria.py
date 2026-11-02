@@ -558,3 +558,78 @@ def test_record_and_view_transactions_through_web_ui(client):
     assert b"OUT" in page_response.data
     assert b"5" in page_response.data
     assert b"3" in page_response.data
+
+# TEST MY BESTSELLING FEATURE
+#see output
+def test_bestsellers_calculates_sales_rate_and_sorts_products(client):
+    # Create first product
+    product_one_response = client.post("/products", json={
+        "name": "Keys",
+        "sku": "KEY-001",
+        "unit_price": 50.00,
+        "quantity_on_hand": 100,
+        "reorder_level": 5
+    })
+    product_one_id = product_one_response.get_json()["id"]
+
+    # Create second product
+    product_two_response = client.post("/products", json={
+        "name": "Modeling Putty",
+        "sku": "MOD-001",
+        "unit_price": 25.00,
+        "quantity_on_hand": 100,
+        "reorder_level": 5
+    })
+    product_two_id = product_two_response.get_json()["id"]
+
+    # Keyboard: 10 + 5 units sold
+    client.post("/transactions", json={
+        "product_id": product_one_id,
+        "type": "OUT",
+        "quantity": 10
+    })
+
+    client.post("/transactions", json={
+        "product_id": product_one_id,
+        "type": "OUT",
+        "quantity": 5
+    })
+
+    # This IN transaction should not count as a sale
+    client.post("/transactions", json={
+        "product_id": product_one_id,
+        "type": "IN",
+        "quantity": 20
+    })
+
+    # Modeling Putty: 30 units sold
+    client.post("/transactions", json={
+        "product_id": product_two_id,
+        "type": "OUT",
+        "quantity": 30
+    })
+
+    response = client.get("/reports/bestsellers?days=30")
+
+    assert response.status_code == 200
+
+    bestsellers = response.get_json()
+
+    assert len(bestsellers) == 2
+
+    # Mouse should rank first because 30 units were sold
+    assert bestsellers[0]["product_id"] == product_two_id
+    assert bestsellers[0]["units_sold"] == 30
+    assert bestsellers[0]["sales_rate"] == 1.0
+
+    # Keyboard should rank second because 15 units were sold
+    assert bestsellers[1]["product_id"] == product_one_id
+    assert bestsellers[1]["units_sold"] == 15
+    assert bestsellers[1]["sales_rate"] == 0.5
+
+#Invalid days parameter should return an error
+def test_bestsellers_rejects_invalid_days(client):
+    response = client.get("/reports/bestsellers?days=0")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "days must be greater than 0"
