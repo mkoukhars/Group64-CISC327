@@ -314,3 +314,69 @@ def test_list_suppliers_returns_contact_details_and_excludes_deleted(client):
 
     assert client.delete(f"/suppliers/{drop['id']}").status_code == 204
     assert [s["id"] for s in client.get("/suppliers").get_json()] == [keep["id"]]
+
+# ---------------------------------------------------------------------------
+# Enhancement (R2): low-stock alerts 
+# ---------------------------------------------------------------------------
+
+def test_alert_appears_when_out_transaction_reaches_threshold_and_clears_on_restock(client):
+    p = make_product(client, name="Gadget", sku="G-1", quantity_on_hand=10, reorder_level=5)
+    assert client.get("/alerts").get_json() == []  # stock above threshold: no alert
+
+    record_tx(client, p["id"], "OUT", 5)  # 10 -> 5, exactly at the threshold
+
+    resp = client.get("/alerts")
+    assert resp.status_code == 200
+    alerts = resp.get_json()
+    assert len(alerts) == 1
+    assert alerts[0] == {
+        "product_id": p["id"],
+        "name": "Gadget",
+        "sku": "G-1",
+        "quantity_on_hand": 5,
+        "reorder_level": 5,
+        "shortfall": 0,
+        "severity": "low_stock",
+    }
+
+    record_tx(client, p["id"], "IN", 20)  # restock: 5 -> 25
+    assert client.get("/alerts").get_json() == []
+
+
+def test_alerts_are_sorted_by_urgency_and_can_be_filtered_by_severity(client):
+    ok = make_product(client, name="Plenty", sku="OK", quantity_on_hand=50, reorder_level=5)
+    low = make_product(client, name="Low", sku="LO", quantity_on_hand=3, reorder_level=5)
+    out = make_product(client, name="Out", sku="OUT", quantity_on_hand=0, reorder_level=5)
+
+    alerts = client.get("/alerts").get_json()
+    assert [a["product_id"] for a in alerts] == [out["id"], low["id"]]  # largest shortfall first
+    assert [a["severity"] for a in alerts] == ["out_of_stock", "low_stock"]
+    assert [a["shortfall"] for a in alerts] == [5, 2]
+    assert ok["id"] not in [a["product_id"] for a in alerts]
+
+    only_out = client.get("/alerts?severity=out_of_stock").get_json()
+    assert [a["product_id"] for a in only_out] == [out["id"]]
+
+    bad = client.get("/alerts?severity=banana")
+    assert bad.status_code == 400
+    assert bad.get_json() == {"error": "severity must be low_stock or out_of_stock"}
+
+
+def test_single_product_alert_and_error_cases(client):
+    low = make_product(client, name="Low", sku="LO", quantity_on_hand=2, reorder_level=5)
+    fine = make_product(client, name="Fine", sku="FN", quantity_on_hand=20, reorder_level=5)
+
+    resp = client.get(f"/alerts/{low['id']}")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["product_id"] == low["id"]
+    assert body["shortfall"] == 3
+    assert body["severity"] == "low_stock"
+
+    no_alert = client.get(f"/alerts/{fine['id']}")
+    assert no_alert.status_code == 404
+    assert no_alert.get_json() == {"error": "No active alert for this product"}
+
+    unknown = client.get("/alerts/999")
+    assert unknown.status_code == 404
+    assert unknown.get_json() == {"error": "Product not found"}
