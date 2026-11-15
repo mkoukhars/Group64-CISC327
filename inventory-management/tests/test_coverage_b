@@ -92,13 +92,13 @@ def test_update_supplier_details(client):
     supplier_id = make_supplier(client)
 
     response = client.put(f"/suppliers/{supplier_id}", json={
-        "name": "Updated Supplier",
-        "contact_email": "updated@example.com"
+        "name": "Bark Supplier",
+        "contact_email": "contact@barksupplier.com"
     })
 
     assert response.status_code == 200
-    assert response.get_json()["name"] == "Updated Supplier"
-    assert response.get_json()["contact_email"] == "updated@example.com"
+    assert response.get_json()["name"] == "Bark Supplier"
+    assert response.get_json()["contact_email"] == "contact@barksupplier.com"
 
 
 # =========================
