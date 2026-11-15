@@ -1,7 +1,28 @@
 from unittest.mock import patch
-
+import notification_service
 from app import store
 
+
+def test_notif_service_accepts_staff_label_recipient():
+    """The simulator accepts non-email recipient labels."""
+
+    notif_service.clear_notifications()
+
+    result = notif_service.send_notification(
+        "Inventory Manager",
+        "Low stock alert",
+        "Please restock the item."
+    )
+
+    assert result is True
+
+    notifications = notif_service.get_notifications()
+
+    assert len(notifications) == 1
+    assert notifications[0]["recipient"] == "Inventory Manager"
+    assert notifications[0]["subject"] == "[Inventory Alert] Low stock alert"
+
+    notif_service.clear_notifications()
 
 def make_test_product(client, quantity=20, reorder_level=5):
     """Create a product for testing w Sophie."""
@@ -155,7 +176,41 @@ def test_notif_not_triggered_mock(client):
 
         # Dependency interaction:.
         mock_notification.assert_not_called()
+def test_notification_uses_supplier_email(client, monkeypatch):
+    """Low-stock notifications are sent to the supplier when available."""
 
+    supplier_response = client.post("/suppliers", json={
+        "name": "Meow Supplies",
+        "contact_email": "supplier@example.com"
+    })
+
+    assert supplier_response.status_code == 201
+    supplier_id = supplier_response.get_json()["id"]
+
+    product_id = make_test_product(client)
+
+    calls = []
+
+    def fake_send_notification(recipient, subject, message):
+        calls.append((recipient, subject, message))
+        return True
+
+    monkeypatch.setattr(
+        "app.routes.transactions.notification_service.send_notification",
+        fake_send_notification
+    )
+
+    response = client.post("/transactions", json={
+        "product_id": product_id,
+        "supplier_id": supplier_id,
+        "type": "OUT",
+        "quantity": 15
+    })
+
+    assert response.status_code == 201
+    assert len(calls) == 1
+    assert calls[0][0] == "supplier@example.com"
+    
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
