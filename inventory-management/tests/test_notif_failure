@@ -1,7 +1,28 @@
 from unittest.mock import patch
-
+import notification_service
 from app import store
 
+
+def test_notif_service_accepts_staff_label_recipient():
+    """The simulator accepts non-email recipient labels."""
+
+    notif_service.clear_notifications()
+
+    result = notif_service.send_notification(
+        "Inventory Manager",
+        "Low stock alert",
+        "Please restock the item."
+    )
+
+    assert result is True
+
+    notifications = notif_service.get_notifications()
+
+    assert len(notifications) == 1
+    assert notifications[0]["recipient"] == "Inventory Manager"
+    assert notifications[0]["subject"] == "[Inventory Alert] Low stock alert"
+
+    notif_service.clear_notifications()
 
 def make_test_product(client, quantity=20, reorder_level=5):
     """Create a product for testing w Sophie."""
