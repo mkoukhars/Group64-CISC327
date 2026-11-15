@@ -1,0 +1,161 @@
+from unittest.mock import patch
+
+from app import store
+
+
+def make_test_product(client, quantity=20, reorder_level=5):
+    """Create a product for testing w Sophie."""
+    response = client.post("/products", json={
+        "name": "Needoh",
+        "sku": "NEEDOH-TEST",
+        "unit_price": 25.00,
+        "quantity_on_hand": quantity,
+        "reorder_level": reorder_level
+    })
+
+    assert response.status_code == 201
+    return response.get_json()["id"]
+
+
+# 
+# MARIA:  tests the failure and non-trigger paths
+#
+
+
+def test_notif_failure_stub(client, monkeypatch, capsys):
+    """A failed notif must not prevent an OUT transaction."""
+
+    product_id = make_test_product(client)
+
+    calls = []
+
+    def fake_send_notif(recipient, subject, message):
+        calls.append((recipient, subject, message))
+        return False
+
+    monkeypatch.setattr(
+        "app.routes.transactions.notification_service.send_notification",
+        fake_send_notif
+    )
+
+    response = client.post("/transactions", json={
+        "product_id": product_id,
+        "type": "OUT",
+        "quantity": 15
+    })
+
+    # App behavior: transaction still succeeds.
+    assert response.status_code == 201
+    assert response.get_json()["type"] == "OUT"
+    assert response.get_json()["quantity"] == 15
+
+    # App state: stock and transaction are updated.
+    assert store.products[product_id].quantity_on_hand == 5
+    assert len(store.transactions) == 1
+
+    # Dependency behavior: notif was attempted.
+    assert len(calls) == 1
+    assert calls[0][0] == "inventory-manager@example.com"
+    assert calls[0][1] == "Low stock: Needoh"
+
+    # Print failure warning.
+    assert "could not be sent" in capsys.readouterr().out
+
+
+def test_notif_failure_mock(client):
+    """Failed notif mock means verify the call and transaction behavior."""
+
+    product_id = make_test_product(client)
+
+    with patch(
+        "app.routes.transactions.notification_service.send_notification",
+        return_value=False
+    ) as mock_notification:
+
+        response = client.post("/transactions", json={
+            "product_id": product_id,
+            "type": "OUT",
+            "quantity": 15
+        })
+
+        # App behavior: transaction still succeeds.
+        assert response.status_code == 201
+        assert response.get_json()["type"] == "OUT"
+
+        # App state: stock and transaction are updated.
+        assert store.products[product_id].quantity_on_hand == 5
+        assert len(store.transactions) == 1
+
+        # Dependency interaction:.
+        mock_notification.assert_called_once_with(
+            "inventory-manager@example.com",
+            "Low stock: Needoh",
+            "Low stock alert from Inventory Management System: "
+            "The stock for 'Needoh' is low. "
+            "Current quantity: 5. "
+            "Threshold: 5. Please restock soon."
+        )
+
+
+def test_notif_not_triggered_stub(client, monkeypatch):
+    """No notif should be attempted when stock remains above threshold."""
+
+    product_id = make_test_product(client)
+
+    calls = []
+
+    def fake_send_notif(recipient, subject, message):
+        calls.append((recipient, subject, message))
+        return True
+
+    monkeypatch.setattr(
+        "app.routes.transactions.notification_service.send_notification",
+        fake_send_notif
+    )
+
+    response = client.post("/transactions", json={
+        "product_id": product_id,
+        "type": "OUT",
+        "quantity": 5
+    })
+
+    # App behavior: transaction succeeds.
+    assert response.status_code == 201
+
+    # App state: stock and transaction are updated.
+    assert store.products[product_id].quantity_on_hand == 15
+    assert len(store.transactions) == 1
+
+    # Dependency was never called.
+    assert calls == []
+
+
+def test_notif_not_triggered_mock(client):
+    """Mock verifies no notification when stock is above reorder level."""
+
+    product_id = make_test_product(client)
+
+    with patch(
+        "app.routes.transactions.notification_service.send_notification",
+        return_value=True
+    ) as mock_notification:
+
+        response = client.post("/transactions", json={
+            "product_id": product_id,
+            "type": "OUT",
+            "quantity": 5
+        })
+
+        assert response.status_code == 201
+        assert response.get_json()["type"] == "OUT"
+
+        # Application state.
+        assert store.products[product_id].quantity_on_hand == 15
+        assert len(store.transactions) == 1
+
+        # Dependency interaction:.
+        mock_notification.assert_not_called()
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v"])
