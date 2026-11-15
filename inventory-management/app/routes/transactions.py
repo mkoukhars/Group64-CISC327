@@ -9,7 +9,7 @@ transactions_bp = Blueprint("transactions", __name__, url_prefix="/transactions"
 
 STAFF_EMAIL = "inventory-manager@example.com"
 
-# ... list_transactions unchanged ...
+
 @transactions_bp.route("", methods=["GET"])
 def list_transactions():
     results = list(store.transactions.values())
@@ -30,6 +30,27 @@ def list_transactions():
         ]
 
     return jsonify([t.to_dict() for t in results])
+
+def send_low_stock_alert(product, supplier_id):
+    """Send a low-stock alert notification for the given product and transaction.
+
+    The recipient is the supplier's contact email if available; otherwise, it is the staff email.
+    """
+    recipient = STAFF_EMAIL
+    supplier = store.suppliers.get(supplier_id)
+    if supplier is not None and supplier.contact_email:
+        recipient = supplier.contact_email
+
+    sent = notification_service.send_notification(
+        recipient,
+        f"Low stock: {product.name}",
+        notification_service.build_low_stock_message(
+            product.name, product.quantity_on_hand, product.reorder_level),
+    )
+    if not sent:
+        # Failure policy: the transaction still succeeds; we just warn.
+        print(f"Warning: low-stock alert for {product.name} could not be sent.")
+    return sent
 
 @transactions_bp.route("", methods=["POST"])
 def create_transaction():
@@ -59,19 +80,5 @@ def create_transaction():
     store.transactions[transaction_id] = transaction
 
     if tx_type == "OUT" and product.quantity_on_hand <= product.reorder_level:
-        recipient = STAFF_EMAIL
-        supplier = store.suppliers.get(transaction.supplier_id)
-        if supplier is not None and supplier.contact_email:
-            recipient = supplier.contact_email
-
-        sent = notification_service.send_notification(
-            recipient,
-            f"Low stock: {product.name}",
-            notification_service.build_low_stock_message(
-                product.name, product.quantity_on_hand, product.reorder_level),
-        )
-        if not sent:
-            # Failure policy: the transaction still succeeds; we just warn.
-            print(f"Warning: low-stock alert for {product.name} could not be sent.")
-
+        send_low_stock_alert(product, data.get("supplier_id"))
     return jsonify(transaction.to_dict()), 201
